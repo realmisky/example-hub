@@ -32,6 +32,8 @@ describe("x402 / MPP end-to-end (local SDK loop)", function () {
     await busd.transfer(payer.address, ethers.parseUnits("1000", 18));
 
     // Merchant charge server (verified SDK wiring).
+    process.env.MPP_SECRET_KEY =
+      process.env.MPP_SECRET_KEY ?? "test-mpp-secret";
     const server = await createLocalChargeServer({
       currency: busdAddress,
       recipient: owner.address as `0x${string}`,

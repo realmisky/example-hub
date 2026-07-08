@@ -22,6 +22,8 @@ describe("payViaMpp (buyer wrapper)", function () {
     await busd.waitForDeployment();
     const busdAddress = (await busd.getAddress()) as `0x${string}`;
 
+    process.env.MPP_SECRET_KEY =
+      process.env.MPP_SECRET_KEY ?? "test-mpp-secret";
     const server = await createLocalChargeServer({
       currency: busdAddress,
       recipient: owner.address as `0x${string}`,

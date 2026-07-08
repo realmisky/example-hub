@@ -75,7 +75,20 @@ export async function createLocalChargeServer(
         },
       }),
     ],
-    secretKey: "demo-secret-do-not-use-in-prod",
+    secretKey:
+      process.env.MPP_SECRET_KEY ??
+      ((): string => {
+        if (process.env.NODE_ENV === "production") {
+          throw new Error(
+            "MPP_SECRET_KEY environment variable is required in production"
+          );
+        }
+        // Local dev only — fail fast if NODE_ENV=production without a key.
+        console.warn(
+          "charge-server: using default demo secret — set MPP_SECRET_KEY for production"
+        );
+        return "demo-secret-do-not-use-in-prod";
+      })(),
   });
 
   const route = mppx.evm.charge({ amount: cfg.amountDisplay });
