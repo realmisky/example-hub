@@ -50,9 +50,9 @@ describe("QRIS parser", function () {
 });
 
 describe("IDR -> BUSD conversion", function () {
-  it("converts using a static rate (1 BUSD = 16000 IDR)", async function () {
-    const rate = new StaticRateSource(1 / 16000);
-    const busd = await rate.idrToStablecoin(16000n, {
+  it("converts using a static rate (1 BUSD = 18000 IDR)", async function () {
+    const rate = StaticRateSource.fromRational(1n, 18000n);
+    const busd = await rate.idrToStablecoin(18000n, {
       symbol: "busd",
       address: "0xe9e7CEA3DedcA5984780Bafc599bE2b0Fa6fC12",
       decimals: 18,
