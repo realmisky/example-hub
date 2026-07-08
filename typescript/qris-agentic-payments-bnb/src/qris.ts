@@ -79,7 +79,11 @@ function parseNested(value: string): NestedField[] {
  * @throws if the payload has no CRC field (tag 63).
  */
 export function parseQris(payload: string): QrisData {
-  const crcStart = payload.indexOf("6304");
+  // SEC-06 FIX: Use lastIndexOf instead of indexOf — the CRC tag (63) is
+  // always the final field, so searching from the end avoids false matches
+  // when "6304" appears inside merchant account info (tag 26-51) or
+  // additional data (tag 62) field values.
+  const crcStart = payload.lastIndexOf("6304");
   if (crcStart < 0) {
     throw new Error("QRIS: missing CRC field (tag 63)");
   }

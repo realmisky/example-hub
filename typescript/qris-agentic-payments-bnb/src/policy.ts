@@ -47,6 +47,11 @@ export class SpendPolicy {
     amount: bigint,
     currentBalance?: bigint
   ): PolicyCheckResult {
+    // SEC-08 FIX: Reject negative amounts — they bypass all caps.
+    if (amount < 0n) {
+      return { allowed: false, reason: `Negative amount ${amount} rejected` };
+    }
+
     const recipientLc = recipient.toLowerCase() as `0x${string}`;
 
     // 1. Blocklist
@@ -103,6 +108,11 @@ export class SpendPolicy {
 
   /** Record an approved payment to update the daily spend tracker. */
   record(amount: bigint): void {
+    // SEC-08 FIX: Reject negative amounts — they can reduce the tracker
+    // and enable cap bypass.
+    if (amount < 0n) {
+      throw new Error(`SpendPolicy.record: negative amount ${amount} rejected`);
+    }
     const today = this.todayKey();
     this.dailySpend.set(today, (this.dailySpend.get(today) ?? 0n) + amount);
   }

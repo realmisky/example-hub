@@ -37,13 +37,24 @@ export class TransFiOfframpStub implements OfframpProvider {
     private readonly apiKey?: string
   ) {}
 
-  async resolveSettlementAddress(_qris?: QrisData): Promise<`0x${string}`> {
+  async resolveSettlementAddress(qris?: QrisData): Promise<`0x${string}`> {
     if (!this.apiKey) {
-      // No key: still return the bridge address so the on-chain leg is exercisable.
+      // SEC-12 FIX: Log a warning when QRIS merchant data is available but
+      // ignored. In the stub we still return the same address (no real PSP
+      // API), but the caller is warned that merchant-specific routing is
+      // not active.
+      if (qris?.merchantName) {
+        console.warn(
+          `TransFiOfframpStub: no apiKey — merchant "${qris.merchantName}" ` +
+            `will use the default settlement address. Set apiKey to enable ` +
+            `per-merchant routing.`
+        );
+      }
       return this.settlementAddress;
     }
-    // Real flow: POST /v1/payouts { rail: "qris", ... } and use the returned
-    // settlement address. Left as a documented integration point.
+    // Real flow: POST /v1/payouts { rail: "qris", merchant: qris.merchantName }
+    // and use the returned per-merchant settlement address.
+    // Left as a documented integration point.
     return this.settlementAddress;
   }
 }

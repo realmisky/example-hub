@@ -30,11 +30,19 @@ describe("payViaMpp (buyer wrapper)", function () {
       settleTxHash: ("0x" + "2".repeat(64)) as `0x${string}`,
     });
 
-    // In-memory fetch shim: probe -> 402 challenge; retry -> 200.
+    // In-memory fetch shim: probe -> 402 challenge; retry -> 200 + receipt.
+    const mockReceipt = Buffer.from(
+      JSON.stringify({ transaction: "0x" + "2".repeat(64) })
+    ).toString("base64");
     const fetchShim: typeof fetch = async (input: any, init?: any) => {
       const req = new Request(input, init);
       if (req.headers.get("Authorization")) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        // SEC-11 FIX: mock server now returns a Payment-Receipt header
+        // with a base64-encoded JSON containing the settlement tx hash.
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Payment-Receipt": mockReceipt },
+        });
       }
       const r = await server.handle(req);
       // server.handle returns { status, challenge }; the challenge Response
@@ -64,9 +72,9 @@ describe("payViaMpp (buyer wrapper)", function () {
     );
 
     expect(result.amount).to.equal(1_000_000_000_000_000_000n);
-    // Demo facilitator emits no Payment-Receipt header -> undefined is valid.
-    expect(result.paymentReceipt).to.satisfy(
-      (v: string | undefined) => v === undefined || typeof v === "string"
-    );
+    // SEC-11 FIX: mock server returns a Payment-Receipt header with the
+    // settlement tx hash. The executor parses it and returns the real txHash.
+    expect(result.paymentReceipt).to.be.a("string");
+    expect(result.txHash).to.equal("0x" + "2".repeat(64));
   });
 });

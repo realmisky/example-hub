@@ -105,13 +105,16 @@ export class LocalIdentityProvider implements IdentityProvider {
   }
 
   async getReputation(agentId: string): Promise<AgentReputation> {
+    // SEC-10 FIX: Return a zero-score reputation for unknown agentIds
+    // instead of a default score 50. Unknown agents should NOT pass the
+    // reputation gate. A score of 0 is blocked by reputationGate (score < 20).
     return (
       this.reputations.get(agentId) ?? {
         jobsCompleted: 0,
         totalVolumeUsd: 0n,
         disputes: 0,
-        score: 50,
-        lastActive: Math.floor(Date.now() / 1000),
+        score: 0,
+        lastActive: 0,
       }
     );
   }

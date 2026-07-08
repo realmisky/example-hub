@@ -102,7 +102,7 @@ export class QrisPayAgent {
   /** Parse + validate + compute the payment plan without broadcasting. */
   async plan(qrisPayload: string): Promise<PaymentPlan> {
     const qris = parsePaymentQris(qrisPayload);
-    const idrAmount = BigInt(qris.amount!.replace(".", ""));
+    const idrAmount = BigInt(qris.amount!.replace(/\./g, ""));
     const tokenAmount = await this.rateSource.idrToStablecoin(
       idrAmount,
       this.token
@@ -206,7 +206,10 @@ export class QrisPayAgent {
       recipient: plan.settlementAddress,
       fiatAmount: plan.idrAmount,
       fiatCurrency: "IDR",
-      fxRate: Number(plan.idrAmount) / Number(plan.tokenAmount),
+      fxRate:
+        plan.tokenAmount > 0n
+          ? Number(plan.idrAmount) / Number(plan.tokenAmount)
+          : 0,
       mode: plan.mode,
       mppReceipt: result.paymentReceipt,
       merchantName: plan.recipient,

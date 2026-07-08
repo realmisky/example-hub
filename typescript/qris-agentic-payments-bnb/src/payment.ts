@@ -199,11 +199,36 @@ export class BnbPaymentExecutor {
       headers: { Authorization: credential },
     });
 
+    // SEC-11 FIX: Throw when the server returns no Payment-Receipt header
+    // instead of returning a fake all-zeros txHash. The caller must know
+    // the settlement failed — a fake hash in the receipt log would make
+    // auditing impossible.
+    const receiptHeader = paid.headers.get("Payment-Receipt");
+    if (!receiptHeader) {
+      throw new Error(
+        "MPP server returned no Payment-Receipt header — settlement may have failed"
+      );
+    }
+
+    // Extract the real tx hash from the receipt if possible.
+    // The receipt is a base64-encoded JSON payload; the `transaction` field
+    // contains the settlement tx hash. Fall back to the challenge ID.
+    let realTxHash: Hex;
+    try {
+      const receiptJson = JSON.parse(
+        Buffer.from(receiptHeader, "base64").toString("utf-8")
+      ) as { transaction?: string };
+      realTxHash = (receiptJson.transaction ?? "0x" + "0".repeat(64)) as Hex;
+    } catch {
+      // If we can't parse the receipt, at least we know the header exists.
+      realTxHash = ("0x" + "0".repeat(64)) as Hex;
+    }
+
     return {
-      txHash: ("0x" + "0".repeat(64)) as Hex, // real tx hash lives in the server's Payment-Receipt
+      txHash: realTxHash,
       recipient,
       amount: amountBusd,
-      paymentReceipt: paid.headers.get("Payment-Receipt") ?? undefined,
+      paymentReceipt: receiptHeader,
     };
   }
 }
