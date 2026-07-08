@@ -98,7 +98,8 @@ resolution by symbol or address, with EIP-3009 domain metadata for the
 
 ```bash
 npx hardhat run scripts/run-agent.ts
-# → builds a dynamic QRIS, parses it, converts 16000 IDR → 1.0 stablecoin, pays on-chain
+# → builds a dynamic QRIS, parses it, converts 16000 IDR → stablecoin, pays on-chain
+# → with RATE_SOURCE=coingecko, fetches the live IDR/stablecoin rate in real time
 ```
 
 **Test suite** (25 tests, ~3s):

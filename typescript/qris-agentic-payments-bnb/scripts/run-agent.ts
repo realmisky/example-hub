@@ -30,7 +30,7 @@ async function main() {
 
   const deps: AgentDeps = {
     payment: executor,
-    rateSource: createRateSource(undefined),
+    rateSource: createRateSource(process.env.RATE_SOURCE),
     offramp: new LocalSettlementAddress(merchant.address as `0x${string}`),
   };
   const agent = new QrisPayAgent(deps);

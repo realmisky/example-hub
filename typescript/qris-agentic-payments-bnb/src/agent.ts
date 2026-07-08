@@ -87,7 +87,8 @@ export class QrisPayAgent {
   constructor(private readonly deps: AgentDeps) {
     this.tokens = deps.tokenRegistry ?? defaultRegistry;
     this.token = deps.token ?? this.tokens.resolve("busd");
-    this.rateSource = deps.rateSource ?? createRateSource(undefined);
+    this.rateSource =
+      deps.rateSource ?? createRateSource(process.env.RATE_SOURCE);
     this.offramp =
       deps.offramp ??
       new LocalSettlementAddress("0x0000000000000000000000000000000000000000");
