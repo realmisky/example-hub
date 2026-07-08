@@ -304,18 +304,32 @@ describe("SEC-06 [MEDIUM]: CRC parser fooled by '6304' in field data", function 
 // =====================================================================
 // SEC-07 [MEDIUM]: QRIS amount replace(".", "") only removes first dot
 // =====================================================================
-describe("SEC-07 [MEDIUM]: amount parsing loses precision with decimals", function () {
-  it("SEC-07 FIX: '16000.50' correctly strips all dots", function () {
+describe("SEC-07 [MEDIUM]: amount parsing handles decimal QRIS safely", function () {
+  it("SEC-07 FIX: '16000.50' truncates fractional part (IDR has 0 decimals)", function () {
     // Build a QRIS with decimal amount
     const decimalFields = { ...fields, "54": "16000.50" };
     const decimalQris = buildQris(decimalFields);
     const parsed = parsePaymentQris(decimalQris);
 
-    // SEC-07 FIX: agent now uses replace(/\./g, "") — removes ALL dots
-    const agentParsed = BigInt(parsed.amount!.replace(/\./g, ""));
+    // SEC-07 FIX: agent splits on "." and takes the integer part.
+    // IDR has ISO 4217 exponent 0 (no cents), so "16000.50" → 16000 IDR.
+    const rawAmount = parsed.amount!;
+    const agentParsed = BigInt(
+      rawAmount.includes(".") ? rawAmount.split(".")[0] : rawAmount
+    );
 
-    // "16000.50" → "1600050" — all dots removed
-    expect(agentParsed).to.equal(1600050n);
+    expect(agentParsed).to.equal(16000n);
+  });
+
+  it("SEC-07 FIX: '16000' (no decimal) still works", function () {
+    const plainFields = { ...fields, "54": "16000" };
+    const plainQris = buildQris(plainFields);
+    const parsed = parsePaymentQris(plainQris);
+    const rawAmount = parsed.amount!;
+    const agentParsed = BigInt(
+      rawAmount.includes(".") ? rawAmount.split(".")[0] : rawAmount
+    );
+    expect(agentParsed).to.equal(16000n);
   });
 });
 

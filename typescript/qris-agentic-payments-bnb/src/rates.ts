@@ -129,6 +129,7 @@ export class CoinGeckoRateSource implements RateSource {
 
 export function createRateSource(mode: string | undefined): RateSource {
   if (mode === "coingecko") return new CoinGeckoRateSource();
-  // Default demo rate: 1 stablecoin ≈ 16,000 IDR.
-  return StaticRateSource.fromRational(1n, 16000n);
+  // Default demo rate: 1 stablecoin ≈ 18,000 IDR (≈ current market rate).
+  // For live rates, set RATE_SOURCE=coingecko in .env.
+  return StaticRateSource.fromRational(1n, 18000n);
 }

@@ -545,15 +545,17 @@ describe("F10: payViaMpp hardcodes authorization domain name='BUSD' version='2' 
 // F11 — qris.ts amount parsing: strip-decimal-dot is wrong (agent.ts:102)
 // ===========================================================================
 describe("F11: agent strips '.' from QRIS amount — '160.50' becomes '16050' not '16050 minor units' (agent.ts:102)", function () {
-  it("SEC-07 FIX: replace(/\\./g, '') removes ALL dots from QRIS amount", async function () {
-    // SEC-07 FIX: agent now uses replace(/\./g, "") — removes ALL dots,
-    // not just the first one. For IDR (2 minor digits), "160.50" → "16050"
-    // which is correct: 160.50 IDR = 16050 minor units.
+  it("SEC-07 FIX: '160.50' truncates fractional part (IDR has 0 decimals)", async function () {
+    // SEC-07 FIX: agent now splits on "." and takes the integer part.
+    // IDR has ISO 4217 exponent 0, so "160.50" → 160 IDR (truncate cents).
     const qrisWithDot = buildQris({ ...baseFields, "54": "160.50" });
     const agent_rateSource = new StaticRateSource(1 / 16000);
     const q = parsePaymentQris(qrisWithDot);
-    const idr = BigInt(q.amount!.replace(/\./g, "")); // "160.50" -> "16050"
-    expect(idr).to.equal(16050n);
+    const rawAmount = q.amount!;
+    const idr = BigInt(
+      rawAmount.includes(".") ? rawAmount.split(".")[0] : rawAmount
+    ); // "160.50" -> "160"
+    expect(idr).to.equal(160n);
 
     const busd = await agent_rateSource.idrToStablecoin(idr, {
       symbol: "busd",
@@ -563,13 +565,17 @@ describe("F11: agent strips '.' from QRIS amount — '160.50' becomes '16050' no
       chainId: 56,
       hasEip3009: true,
     });
-    // 16050 IDR / 16000 = 1.003125 BUSD — correct for 160.50 IDR
-    expect(busd).to.be.greaterThan(1n * 10n ** 18n);
+    // 160 IDR / 16000 = 0.01 BUSD
+    expect(busd).to.be.greaterThan(0n);
+    expect(busd).to.be.lessThan(1n * 10n ** 18n);
   });
-  it("a QRIS amount with a comma (e.g. '1,600') crashes agent.plan() with an uncaught SyntaxError", function () {
+  it("SEC-07 FIX: '1,600' comma still throws (invalid BigInt)", function () {
     const qrisWithComma = buildQris({ ...baseFields, "54": "1,600" });
     const q = parsePaymentQris(qrisWithComma);
-    expect(() => BigInt(q.amount!.replace(".", ""))).to.throw(SyntaxError);
+    const rawAmount = q.amount!;
+    expect(() =>
+      BigInt(rawAmount.includes(".") ? rawAmount.split(".")[0] : rawAmount)
+    ).to.throw(SyntaxError);
   });
 });
 

@@ -98,7 +98,7 @@ resolution by symbol or address, with EIP-3009 domain metadata for the
 
 ```bash
 npx hardhat run scripts/run-agent.ts
-# → builds a dynamic QRIS, parses it, converts 16000 IDR → stablecoin, pays on-chain
+# → builds a dynamic QRIS, parses it, converts 18000 IDR → stablecoin, pays on-chain
 # → with RATE_SOURCE=coingecko, fetches the live IDR/stablecoin rate in real time
 ```
 
@@ -130,11 +130,11 @@ Expected output:
 ```
 [Layer 1] Intent capture (Web2 surface)
    QRIS scan · REST webhook · chat cmd
-        │  "pay 16000 IDR to WARUNG PAK DANU"
+        │  "pay 18000 IDR to WARUNG PAK DANU"
         ▼
 [Layer 2] Translation / orchestration (the agent core)
    parse → validate CRC16 → FX convert → identity check → policy gate
-        │  IDR 16000 → stablecoin 1.0 → verified → allowed
+        │  IDR 18000 → stablecoin 1.0 → verified → allowed
         ▼
 [Layer 3] Settlement (Web3)
    direct ERC20 transfer  OR  x402/MPP 402-challenge → credential → retry

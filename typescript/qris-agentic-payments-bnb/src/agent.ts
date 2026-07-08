@@ -103,7 +103,15 @@ export class QrisPayAgent {
   /** Parse + validate + compute the payment plan without broadcasting. */
   async plan(qrisPayload: string): Promise<PaymentPlan> {
     const qris = parsePaymentQris(qrisPayload);
-    const idrAmount = BigInt(qris.amount!.replace(/\./g, ""));
+    // Parse the IDR amount from the QRIS tag 54.
+    // QRIS amounts may be plain integers ("16000") or decimal strings
+    // ("16000.00"). IDR has ISO 4217 exponent 0 (no cents), so we parse
+    // the decimal and truncate the fractional part.
+    // This is safe against both "16000" and "16000.00" forms.
+    const rawAmount = qris.amount ?? "0";
+    const idrAmount = BigInt(
+      rawAmount.includes(".") ? rawAmount.split(".")[0] : rawAmount
+    );
     const tokenAmount = await this.rateSource.idrToStablecoin(
       idrAmount,
       this.token
