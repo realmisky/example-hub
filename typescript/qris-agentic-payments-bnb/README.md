@@ -1,17 +1,49 @@
 # QRIS Agentic Payments on BNB Chain
 
-A **Web2.5 agentic payments** cookbook: an autonomous agent that parses a QRIS
-(Quick Response Code Indonesian Standard) payment code, converts the IDR amount
-to BUSD (18-decimal BNB Chain native stablecoin), and settles on BNB Chain via a
-direct ERC20 transfer or the x402/MPP machine-payment protocol (`@bnb-chain/mpp`).
+A **Web2.5 agentic payments** cookbook aligned with the **BNBAgent SDK** stack
+(BAP-692): an autonomous agent that parses a QRIS (Indonesia national QR)
+payment code, converts IDR to a BNB Chain native stablecoin (BUSD / FDUSD / $U),
+and settles on BNB Chain via direct ERC20 transfer or the x402/MPP
+machine-payment protocol (`@bnb-chain/mpp`).
 
-This bridges Indonesia's national QR standard with BNB's agentic-payments stack —
-the same corridor Bitget Wallet and TransFi already operate — and is the first
-example in the hub to demonstrate the x402 / MPP `402 Payment Required` flow.
+This is the first example in the hub to demonstrate the full Web2.5 agent
+economy pattern: **ERC-8004 identity** → **QRIS intent capture** → **FX
+conversion** → **spend policy gate** → **on-chain settlement** → **receipt +
+reputation**.
 
-Per BNB Chain ecosystem rules, settlement uses **BUSD**
-(`0xe9e7CEA3DedcA5984780Bafc599bE2b0Fa6fC12`, 18 decimals) — a native BSC
-stablecoin, not a third-party token.
+## What it does
+
+```
+QRIS code → parse + CRC16 validate → IDR→stablecoin FX → identity check →
+spend policy gate → settle on BNB Chain (direct | x402/MPP) → receipt recorded →
+reputation updated
+```
+
+## BNBAgent SDK Stack Alignment
+
+This example implements the four layers from BAP-692:
+
+| Layer | Standard | This Example |
+| --- | --- | --- |
+| **Identity** | ERC-8004 | `src/identity.ts` — agent registration, reputation, gate |
+| **Commerce** | ERC-8183 | Future: escrow job lifecycle (documented seam) |
+| **Payment** | MPP + x402 | `src/payment.ts` — direct transfer + `@bnb-chain/mpp` 402 flow |
+| **Memory** | BNB Greenfield | `src/receipts.ts` — receipt log (Greenfield seam) |
+
+## Multi-Token Support
+
+The agent settles in whichever curated BNB Chain stablecoin the merchant
+prefers — not just BUSD:
+
+| Token | Address | EIP-3009 | Use Case |
+| --- | --- | --- | --- |
+| **BUSD** | `0xe9e7…C12` | ✅ | Default settlement token |
+| **FDUSD** | `0xc5f0…51d` | ✅ | Binance x402 native support |
+| **$U** | `0x4e59…8d1a` | ✅ | Gasless (EIP-3009), used by BNBAgent SDK |
+
+All tokens are 18 decimals on BSC. The `TokenRegistry` (`src/tokens.ts`) handles
+resolution by symbol or address, with EIP-3009 domain metadata for the
+`authorization` credential path.
 
 ## Getting Started
 
@@ -50,16 +82,13 @@ stablecoin, not a third-party token.
    BSC_TESTNET_RPC=https://data-seed-prebsc-1-s1.bnbchain.org:8545
    BSC_RPC=https://bsc-dataseed.bnbchain.org
 
-   # Settlement address that receives BUSD on-chain. In production this is the
-   # PSP / off-ramp bridge (e.g. TransFi) that converts BUSD -> IDR.
+   # Settlement address that receives stablecoin on-chain.
    SETTLEMENT_ADDRESS=
 
-   # Live FX source. Leave empty for the static demo rate (1 BUSD = 16000 IDR)
-   # or set to "coingecko" to fetch live BUSD/IDR.
+   # Live FX source. Leave empty for static demo rate or set to "coingecko".
    RATE_SOURCE=
 
-   # x402 / MPP protected URL. When set, the agent can pay via a 402 challenge
-   # credential instead of a plain transfer.
+   # x402 / MPP protected URL. When set, the agent pays via 402 challenge.
    MPP_PROTECTED_URL=
    ```
 
@@ -69,10 +98,10 @@ stablecoin, not a third-party token.
 
 ```bash
 npx hardhat run scripts/run-agent.ts
-# → builds a dynamic QRIS, parses it, converts 16000 IDR → 1.0 BUSD, pays on-chain
+# → builds a dynamic QRIS, parses it, converts 16000 IDR → 1.0 stablecoin, pays on-chain
 ```
 
-**Test suite** (7 tests, ~3s):
+**Test suite** (25 tests, ~3s):
 
 ```bash
 npx hardhat test
@@ -81,24 +110,18 @@ npx hardhat test
 Expected output:
 
 ```
-  QRIS parser
-    ✔ validates CRC16-CCITT correctly
-    ✔ detects a tampered CRC
-    ✔ rejects a static code with no amount
+  QRIS parser (3 tests)
+  IDR -> BUSD conversion (1 test)
+  QrisPayAgent end-to-end (1 test)
+  Multi-token registry (4 tests)
+  ERC-8004 agent identity (2 tests)
+  Reputation gate (3 tests)
+  Spend policy (5 tests)
+  Receipt log (2 tests)
+  Agent with multi-token + policy + receipts (2 tests)
+  x402 / MPP end-to-end (2 tests)
 
-  IDR -> BUSD conversion
-    ✔ converts using a static rate (1 BUSD = 16000 IDR)
-
-  QrisPayAgent end-to-end (local network)
-    ✔ parses, converts, and pays BUSD on-chain
-
-  x402 / MPP end-to-end (local SDK loop)
-    ✔ buyer pays a 402 challenge and server settles
-
-  payViaMpp (buyer wrapper)
-    ✔ probes 402, builds credential, retries, settles
-
-  7 passing
+  25 passing (3s)
 ```
 
 ## Architecture (5-layer Web2.5 model)
@@ -106,60 +129,54 @@ Expected output:
 ```
 [Layer 1] Intent capture (Web2 surface)
    QRIS scan · REST webhook · chat cmd
-        │  raw instruction ("pay 16000 IDR to WARUNG PAK DANU")
+        │  "pay 16000 IDR to WARUNG PAK DANU"
         ▼
 [Layer 2] Translation / orchestration (the agent core)
-   parse → validate → FX convert → resolve counterparty → build tx
-        │  IDR 16000  ──rate──▶  BUSD 1.0  ──▶  recipient addr
+   parse → validate CRC16 → FX convert → identity check → policy gate
+        │  IDR 16000 → stablecoin 1.0 → verified → allowed
         ▼
 [Layer 3] Settlement (Web3)
    direct ERC20 transfer  OR  x402/MPP 402-challenge → credential → retry
-        │  on-chain BUSD moves; tx hash is the proof
+        │  on-chain stablecoin moves; tx hash is the proof
         ▼
 [Layer 4] Reconciliation / off-ramp (Web2.5)
-   PSP converts BUSD→IDR and credits merchant; or API returns Payment-Receipt
+   PSP converts stablecoin→IDR; receipt recorded for audit
         │
         ▼
-[Layer 5] Reporting (Web2 surface)
-   200 OK · receipt · balance update · audit log
+[Layer 5] Reporting (Web2 surface + Greenfield memory)
+   200 OK · receipt · balance update · reputation update · audit log
 ```
 
-Concrete file mapping:
+### File mapping
 
 ```
-src/qris.ts          parse + CRC16-CCITT validate (EMVCo TLV, pure TS, no deps)
-src/rates.ts         IDR → BUSD (StaticRateSource | CoinGeckoRateSource)
-src/offramp.ts       resolve settlement address (LocalSettlementAddress | TransFi stub)
-src/payment.ts       BnbPaymentExecutor (ethers local | viem + x402/MPP)
-src/agent.ts         QrisPayAgent orchestrator (plan → execute)
-src/charge-server.ts minimal 402 server for the x402/MPP loop demo
-scripts/run-agent.ts self-contained demo
-contracts/MockBUSD.sol  18-decimal BUSD stand-in (matches real BSC BUSD)
-test/*.test.ts       7 passing tests
+src/qris.ts          QRIS parse + CRC16-CCITT (EMVCo TLV, pure TS, no deps)
+src/tokens.ts        Curated BNB Chain stablecoin registry (BUSD, FDUSD, $U)
+src/rates.ts         IDR → any stablecoin (static | CoinGecko, multi-token)
+src/offramp.ts       Settlement address seam (local | TransFi PSP stub)
+src/identity.ts      ERC-8004 agent identity + reputation + gate
+src/policy.ts        Spend guardrails (per-tx cap, daily cap, allowlist)
+src/receipts.ts      Payment receipt log (Greenfield memory seam)
+src/payment.ts       BnbPaymentExecutor (direct transfer | x402/MPP)
+src/agent.ts         QrisPayAgent orchestrator (plan → policy → execute → receipt)
+src/charge-server.ts Minimal 402 server for the x402/MPP loop demo
+contracts/MockBUSD.sol  18-decimal stablecoin stand-in
+test/*.test.ts       25 passing tests
 ```
 
 ## Usage
 
 ```ts
-import { buildQris, parsePaymentQris } from "./src/qris";
+import { buildQris } from "./src/qris";
 import { QrisPayAgent } from "./src/agent";
 import { BnbPaymentExecutor } from "./src/payment";
 import { LocalSettlementAddress } from "./src/offramp";
+import { defaultRegistry } from "./src/tokens";
 
-// 1. Ingest a scanned code (string from your QR reader).
-const code = buildQris({
-  "00": "01",
-  "01": "12",
-  "26": "...",
-  "52": "5812",
-  "53": "360",
-  "54": "16000",
-  "58": "ID",
-  "59": "WARUNG PAK DANU",
-  "60": "JAKARTA",
-});
+// 1. Ingest a scanned QRIS code.
+const code = buildQris({ /* ... */ });
 
-// 2. Wire the executor (local demo uses an ethers signer; real BSC uses a key).
+// 2. Wire the executor + multi-token + spend guardrails.
 const executor = new BnbPaymentExecutor({
   rpcUrl: "",
   chainId: 31337,
@@ -167,31 +184,44 @@ const executor = new BnbPaymentExecutor({
 });
 executor.attachEthersSigner(payerSigner);
 
-// 3. Plan (dry-run: parse + convert, no broadcast) then execute.
+// 3. Plan (dry-run: parse + convert + identity + policy check, no broadcast).
 const agent = new QrisPayAgent({
   payment: executor,
   offramp: new LocalSettlementAddress(merchantAddress),
+  token: defaultRegistry.resolve("fdusd"), // settle in FDUSD
+  spendRules: {
+    perTxCap: 10n * 10n ** 18n,    // max 10 stablecoin per tx
+    dailyCap: 100n * 10n ** 18n,    // max 100 per day
+    allowlist: [merchantAddress],   // only pay known merchants
+  },
 });
-const plan = await agent.plan(code); // { idrAmount, busdAmount, settlementAddress, crcValid }
+
+const plan = await agent.plan(code);
 if (!plan.crcValid) throw new Error("tampered QRIS");
-const result = await agent.execute(plan); // { txHash, recipient, amount }
+if (plan.policyAllowed === false) throw new Error(plan.policyReason);
+
+// 4. Execute → on-chain settlement + receipt recorded.
+const result = await agent.execute(plan);
+console.log(result.txHash, result.receipt.receiptId);
 ```
 
 ### x402 / MPP mode
 
 Set `MPP_PROTECTED_URL` to a running `@bnb-chain/mpp` charge-server. The agent
-will fetch the `402` challenge, build a BUSD `authorization` credential via the
-verified `ClientMppx` flow, then retry so the server settles. See
+will fetch the `402` challenge, build a stablecoin `authorization` credential
+via the verified `ClientMppx` flow, then retry so the server settles. See
 https://docs.bnbchain.org/developer-kit/mpp-sdk/.
 
 ## Going to production
 
-| Demo piece               | Production swap                                                            |
-| ------------------------ | -------------------------------------------------------------------------- |
-| `MockBUSD`               | Real BSC BUSD `0xe9e7CEA3DedcA5984780Bafc599bE2b0Fa6fC12` (18 decimals)    |
-| `StaticRateSource`       | `CoinGeckoRateSource` (or your oracle / PSP quote)                         |
-| `LocalSettlementAddress` | `TransFiOfframpStub` → PSP that converts BUSD→IDR and credits the merchant |
-| ethers local signer      | `PRIVATE_KEY` + BSC RPC (viem http transport)                              |
+| Demo piece | Production swap |
+| --- | --- |
+| `MockBUSD` | Real BSC stablecoin (BUSD `0xe9e7…`, FDUSD `0xc5f0…`, $U `0x4e59…`) |
+| `StaticRateSource` | `CoinGeckoRateSource` or oracle / PSP quote |
+| `LocalSettlementAddress` | TransFi / PSP off-ramp |
+| `LocalIdentityProvider` | ERC-8004 registry contract (gas-free via MegaFuel) |
+| `LocalReceiptLog` | BNB Greenfield durable storage |
+| ethers local signer | `PRIVATE_KEY` + BSC RPC (viem http transport) |
 
 QRIS limits (Bank Indonesia): 500 USD/tx, 1,500 USD/day, 10,000 USD/month.
 
@@ -199,10 +229,13 @@ QRIS limits (Bank Indonesia): 500 USD/tx, 1,500 USD/day, 10,000 USD/month.
 
 - CRC16 validated **before** any conversion/payment — tampered codes are rejected.
 - Only IDR (`360`) dynamic QRIS (with amount tag `54`) are payable.
+- Spend policy is enforced **before** broadcast — the agent never silently
+  exceeds its guardrails.
+- Reputation gate restricts new/low-reputation agents from high-value payments.
 - On-chain leg is checks-effects: the ERC20 transfer is the only state change.
 - PSP seam is explicit — never hard-code a settlement address you don't control.
-- The agent is a hot wallet. Prefer scoped keys, spending caps (`maxAmount` in
-  MPP), and a separate settlement address per PSP.
+- The agent is a hot wallet. Prefer scoped keys, spending caps, EIP-3009
+  gasless transfers, and a separate settlement address per PSP.
 
 ## License
 

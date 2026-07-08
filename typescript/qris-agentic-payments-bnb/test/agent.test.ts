@@ -52,7 +52,14 @@ describe("QRIS parser", function () {
 describe("IDR -> BUSD conversion", function () {
   it("converts using a static rate (1 BUSD = 16000 IDR)", async function () {
     const rate = new StaticRateSource(1 / 16000);
-    const busd = await rate.idrToBusd(16000n);
+    const busd = await rate.idrToStablecoin(16000n, {
+      symbol: "busd",
+      address: "0xe9e7CEA3DedcA5984780Bafc599bE2b0Fa6fC12",
+      decimals: 18,
+      name: "Binance USD",
+      chainId: 56,
+      hasEip3009: true,
+    });
     expect(busd).to.equal(1_000_000_000_000_000_000n); // 1 BUSD = 1e18 base units
   });
 });
@@ -84,7 +91,7 @@ describe("QrisPayAgent end-to-end (local network)", function () {
     const plan = await agent.plan(VALID_QRIS);
     expect(plan.crcValid).to.equal(true);
     expect(plan.idrAmount).to.equal(16000n);
-    expect(plan.busdAmount).to.equal(1_000_000_000_000_000_000n);
+    expect(plan.tokenAmount).to.equal(1_000_000_000_000_000_000n);
     expect(plan.settlementAddress.toLowerCase()).to.equal(
       merchant.address.toLowerCase()
     );

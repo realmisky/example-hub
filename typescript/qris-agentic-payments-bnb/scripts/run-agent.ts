@@ -56,10 +56,18 @@ async function main() {
   console.log("--- Plan ---");
   console.log("Merchant    :", plan.recipient);
   console.log("IDR amount  :", plan.idrAmount.toString());
-  console.log("BUSD amount :", (Number(plan.busdAmount) / 1e18).toFixed(18));
+  console.log(
+    `${plan.tokenSymbol} amount  :`,
+    (Number(plan.tokenAmount) / 1e18).toFixed(18)
+  );
   console.log("Settles to  :", plan.settlementAddress);
   console.log("Mode        :", plan.mode);
   console.log("CRC valid   :", plan.crcValid);
+  console.log(
+    "Identity    :",
+    plan.identityChecked ? "verified" : "unverified"
+  );
+  console.log("Policy      :", plan.policyAllowed ?? "none");
 
   if (!plan.crcValid) {
     console.error("Aborting: QRIS CRC invalid.");
@@ -68,12 +76,20 @@ async function main() {
 
   const result = await agent.execute(plan);
   console.log("\n--- On-chain payment ---");
-  console.log("txHash :", result.txHash);
-  console.log("to     :", result.recipient);
-  console.log("amount :", (Number(result.amount) / 1e18).toFixed(18), "BUSD");
-
+  console.log("txHash   :", result.txHash);
+  console.log("to       :", result.recipient);
+  console.log(
+    "amount   :",
+    (Number(result.amount) / 1e18).toFixed(18),
+    plan.tokenSymbol
+  );
+  console.log("receipt  :", result.receipt.receiptId);
   const bal = await executor.balanceOf(plan.settlementAddress);
-  console.log("merchant BUSD balance:", (Number(bal) / 1e18).toFixed(18));
+  console.log(
+    "merchant balance:",
+    (Number(bal) / 1e18).toFixed(18),
+    plan.tokenSymbol
+  );
 }
 
 main().catch((e) => {
