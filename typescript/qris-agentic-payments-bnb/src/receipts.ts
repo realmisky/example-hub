@@ -9,12 +9,17 @@
  *
  * The receipt captures the full Web2.5 chain: QRIS source → FX conversion →
  * on-chain settlement → PSP off-ramp confirmation. Each receipt gets a
- * deterministic ID (keccak of the tx hash + timestamp) so it can be referenced
- * from ERC-8183 job deliverables.
+ * deterministic ID (SHA-256 of the tx hash + timestamp) so it can be
+ * referenced from ERC-8183 job deliverables.
+ *
+ * SEC-05 FIX: receiptId() now uses SHA-256 (256-bit hash) instead of a
+ * 31-bit `| 0` truncation. This makes collisions computationally infeasible.
  */
 
+import { createHash } from "node:crypto";
+
 export interface PaymentReceipt {
-  /** Deterministic receipt ID. */
+  /** Deterministic receipt ID (SHA-256, 64 hex chars). */
   receiptId: string;
   /** On-chain transaction hash. */
   txHash: `0x${string}`;
@@ -62,13 +67,19 @@ export interface ReceiptLog {
 /** In-memory receipt log for the demo/tests. */
 export class LocalReceiptLog implements ReceiptLog {
   private readonly receipts: PaymentReceipt[] = [];
+  private readonly byId = new Map<string, PaymentReceipt>();
 
   async append(receipt: PaymentReceipt): Promise<void> {
+    // SEC-05 FIX: Reject duplicate receiptIds to prevent silent shadowing.
+    if (this.byId.has(receipt.receiptId)) {
+      throw new Error(`Duplicate receiptId: ${receipt.receiptId}`);
+    }
     this.receipts.unshift(receipt);
+    this.byId.set(receipt.receiptId, receipt);
   }
 
   async get(receiptId: string): Promise<PaymentReceipt | null> {
-    return this.receipts.find((r) => r.receiptId === receiptId) ?? null;
+    return this.byId.get(receiptId) ?? null;
   }
 
   async list(limit = 50): Promise<PaymentReceipt[]> {
@@ -80,13 +91,15 @@ export class LocalReceiptLog implements ReceiptLog {
   }
 }
 
-/** Generate a deterministic receipt ID from tx hash + timestamp. */
+/**
+ * Generate a deterministic receipt ID from tx hash + timestamp using SHA-256.
+ * SEC-05 FIX: Uses 256-bit SHA-256 instead of a 31-bit `| 0` hash.
+ * Collision probability is now ~2^-128 (birthday bound) — computationally
+ * infeasible.
+ */
 export function receiptId(txHash: string, timestamp: number): string {
-  // Simple hash — production would use keccak256.
-  let h = 0;
-  const s = txHash + timestamp.toString();
-  for (let i = 0; i < s.length; i++) {
-    h = (h * 31 + s.charCodeAt(i)) | 0;
-  }
-  return "rcpt_" + Math.abs(h).toString(16).padStart(8, "0");
+  const hash = createHash("sha256")
+    .update(txHash + timestamp.toString())
+    .digest("hex");
+  return "rcpt_" + hash;
 }

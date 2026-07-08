@@ -65,8 +65,11 @@ export interface PaymentPlan {
   mode: "direct" | "mpp";
   /** Convenience mirror of qris.crcValid for dry-run checks. */
   crcValid: boolean;
-  /** Identity check result. */
+  /** Identity check result — true only if agent is registered (ERC-8004). */
   identityChecked: boolean;
+  /** Reputation gate result — false if agent is blocked by reputation. */
+  reputationOk: boolean;
+  reputationReason?: string;
   /** Policy check result (null if no policy configured). */
   policyAllowed: boolean | null;
   policyReason?: string;
@@ -107,15 +110,29 @@ export class QrisPayAgent {
 
     const settlementAddress = await this.offramp.resolveSettlementAddress(qris);
 
-    // Identity check: verify the agent wallet is registered (ERC-8004).
+    // SEC-02 / SEC-03 FIX: Actually perform identity + reputation checks.
+    // resolveIdentity() returns null for unregistered wallets, and
+    // reputationGate() blocks low-reputation agents from high-value payments.
     let identityChecked = false;
-    if (this.deps.payment["cfg"]?.privateKey) {
-      const wallet = this.deps.payment["cfg"].privateKey!;
-      // In production: call identityProvider.resolveIdentity(wallet)
-      // For demo: just mark as checked since the local provider is a stub.
-      identityChecked = true;
+    let reputationOk = false;
+    let reputationReason: string | undefined;
+    const wallet = this.deps.payment["cfg"]?.privateKey;
+    if (wallet) {
+      const agentWallet = (await import("viem/accounts")).privateKeyToAccount(
+        wallet as `0x${string}`
+      ).address;
+      const identity = await this.identityProvider.resolveIdentity(agentWallet);
+      if (identity) {
+        identityChecked = true;
+        const rep = await this.identityProvider.getReputation(identity.agentId);
+        const gate = reputationGate(rep, tokenAmount);
+        reputationOk = gate.allowed;
+        reputationReason = gate.reason;
+      }
     } else {
-      identityChecked = true; // local Hardhat demo — skip real identity
+      // Local Hardhat demo — no privateKey, skip identity (safe: no real value).
+      identityChecked = true;
+      reputationOk = true;
     }
 
     // Policy check: verify the payment is within guardrails.
@@ -138,6 +155,8 @@ export class QrisPayAgent {
       mode: this.deps.mppProtectedUrl ? "mpp" : "direct",
       crcValid: qris.crcValid,
       identityChecked,
+      reputationOk,
+      reputationReason,
       policyAllowed,
       policyReason,
     };
@@ -145,11 +164,19 @@ export class QrisPayAgent {
 
   /** Execute the on-chain payment described by the plan. */
   async execute(plan: PaymentPlan) {
-    // Enforce policy before broadcasting.
-    if (this.policy && plan.policyAllowed === false) {
-      throw new Error(
-        `Payment blocked by spend policy: ${plan.policyReason ?? "unknown"}`
+    // SEC-01 FIX: Re-check the policy at execute time — do NOT trust the
+    // mutable plan.policyAllowed field. The plan object could have been
+    // mutated between plan() and execute() (TOCTOU).
+    if (this.policy) {
+      const liveCheck = this.policy.check(
+        plan.settlementAddress,
+        plan.tokenAmount
       );
+      if (!liveCheck.allowed) {
+        throw new Error(
+          `Payment blocked by spend policy: ${liveCheck.reason ?? "unknown"}`
+        );
+      }
     }
 
     let result;

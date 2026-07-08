@@ -37,7 +37,7 @@ export class TransFiOfframpStub implements OfframpProvider {
     private readonly apiKey?: string
   ) {}
 
-  async resolveSettlementAddress(): Promise<`0x${string}`> {
+  async resolveSettlementAddress(_qris?: QrisData): Promise<`0x${string}`> {
     if (!this.apiKey) {
       // No key: still return the bridge address so the on-chain leg is exercisable.
       return this.settlementAddress;

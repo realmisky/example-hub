@@ -48,23 +48,24 @@ async function deployMockToken() {
 // ===========================================================================
 describe("F1: receiptId collisions via 32-bit truncation (receipts.ts:84-92)", function () {
   it("produces identical IDs for two different (txHash, timestamp) pairs (birthday collision)", function () {
-    // The hash is `h = (h*31 + ch) | 0` — a 32-bit signed int multiply,
-    // output compressed to 8 hex chars (32 bits, ~4 billion values). The
-    // birthday bound pushes a collision within ~77k pairs. Below are two
-    // distinct (txHash, ts) pairs that collide, found by deterministic
-    // enumeration (no RNG → flake-free). An attacker who controls the tx
-    // hash (e.g. by gas-spinning raw transactions) can shadow an earlier
-    // receipt's ID (see F14 for the silent log overwrite).
-    const txA = "0x" + "0".repeat(58) + "08b28a";
-    const tsA = 1700569994;
-    const txB = "0x" + "0".repeat(58) + "0ad52a";
-    const tsB = 1700709930;
-    const idA = receiptId(txA, tsA);
-    const idB = receiptId(txB, tsB);
-    console.log(`    idA=${idA}  idB=${idB}`);
-    expect(idA).to.equal(idB, "two distinct (txHash,ts) pairs must collide");
-    expect(txA).to.not.equal(txB);
-    expect(tsA).to.not.equal(tsB);
+    // SEC-05 FIX: SHA-256 (256-bit) — collision is computationally
+    // infeasible. Generate many IDs and verify no collision.
+    const ids = new Set<string>();
+    let collision = false;
+    for (let i = 0; i < 500000; i++) {
+      const tx =
+        "0x" + Math.random().toString(16).slice(2).padEnd(64, "0").slice(0, 64);
+      const ts = Math.floor(Math.random() * 2 ** 31);
+      const id = receiptId(tx, ts);
+      if (ids.has(id)) {
+        collision = true;
+        break;
+      }
+      ids.add(id);
+    }
+    expect(collision, "SHA-256 must not collide in 500k entries").to.equal(
+      false
+    );
   });
 
   it("receiptId output space is far smaller than claimed (8 hex = 32 bits)", function () {
@@ -72,7 +73,8 @@ describe("F1: receiptId collisions via 32-bit truncation (receipts.ts:84-92)", f
     // is a weak hash. Demonstrate the entire space fits in ~4 billion, not
     // 2^256. We check that IDs are at most 8 hex chars.
     const id = receiptId("0x" + "f".repeat(64), 2 ** 31);
-    expect(id).to.match(/^rcpt_[0-9a-f]{1,8}$/);
+    // SEC-05 FIX: SHA-256 output = 64 hex chars (256 bits), not 8.
+    expect(id).to.match(/^rcpt_[0-9a-f]{64}$/);
   });
 });
 
@@ -292,19 +294,28 @@ describe("F5: plan()/execute() TOCTOU — execute does not re-check policy (agen
     expect(plan1.policyAllowed).to.equal(true); // under cap at plan time
     expect(plan2.policyAllowed).to.equal(true); // ALSO under cap — tracker not incremented
 
-    // Both execute successfully — and the merchant receives 2 BUSD despite
-    // a 1-BUSD daily cap. record() is only called AFTER the broadcast.
+    // SEC-01 FIX: execute() now re-checks the policy live.
+    // First execute succeeds (tracker = 0, 1 BUSD is under cap).
     const r1 = await agent.execute(plan1);
-    const r2 = await agent.execute(plan2);
     expect(r1.txHash).to.match(/^0x[0-9a-f]+$/i);
-    expect(r2.txHash).to.match(/^0x[0-9a-f]+$/i);
 
-    // The merchant received 2 BUSD despite a 1-BUSD daily cap.
-    // This proves: execute() does not re-check the policy, and record()
-    // is called AFTER the first execute — but the second plan was already
-    // created with policyAllowed=true.
+    // Second execute should FAIL — tracker now shows 1 BUSD spent,
+    // and 1+1=2 > daily cap of 1. The live re-check catches it.
+    let threw = false;
+    try {
+      await agent.execute(plan2);
+    } catch (e: any) {
+      threw = true;
+      expect(e.message).to.match(/spend policy/);
+    }
+    expect(
+      threw,
+      "second execute must be blocked by live policy re-check"
+    ).to.equal(true);
+
+    // Only 1 BUSD settled (not 2) — cap enforced.
     const bal = await executor.balanceOf(merchant.address as `0x${string}`);
-    expect(bal).to.equal(2n * 10n ** 18n); // 2 BUSD settled, cap bypassed
+    expect(bal).to.equal(1n * 10n ** 18n);
   });
 });
 
@@ -352,18 +363,33 @@ describe("F6: execute() trusts a fully-mutable PaymentPlan — policy bypass by 
       mode: "direct",
       crcValid: true,
       identityChecked: true, // skipped identity
+      reputationOk: true,
       policyAllowed: true, // <-- the lie
       policyReason: undefined,
     };
 
-    const result = await agent.execute(forgedPlan);
-    expect(result.txHash).to.match(/^0x[0-9a-f]+$/i);
+    // SEC-01 FIX: execute() now re-checks policy live. The forged plan
+    // has policyAllowed=true, but the live check sees:
+    //   - recipient not in allowlist (attacker address)
+    //   - amount 100 BUSD >> perTxCap (1 BUSD)
+    // Both conditions cause rejection.
+    let threw = false;
+    try {
+      await agent.execute(forgedPlan);
+    } catch (e: any) {
+      threw = true;
+      expect(e.message).to.match(/spend policy/);
+    }
+    expect(
+      threw,
+      "forged plan must be rejected by live policy re-check"
+    ).to.equal(true);
 
-    // Attacker received 100 BUSD — daily cap, per-tx cap, and allowlist all bypassed.
+    // Attacker received nothing — payment was blocked.
     const attackerBal = await executor.balanceOf(
       attacker.address as `0x${string}`
     );
-    expect(attackerBal).to.equal(100n * 10n ** 18n);
+    expect(attackerBal).to.equal(0n);
   });
 });
 
@@ -609,8 +635,8 @@ describe("F13: charge-server.ts uses a hardcoded JWT secret (charge-server.ts:78
 // ===========================================================================
 // F14 — receipts.ts LocalReceiptLog has no dedup / overwrite protection (receipts.ts:66-68)
 // ===========================================================================
-describe("F14: LocalReceiptLog.append allows duplicate receiptIds without warning (receipts.ts:66-68)", function () {
-  it("the same receiptId can be appended twice — silent shadowing in get()", async function () {
+describe("F14: LocalReceiptLog.append now rejects duplicate receiptIds (SEC-05 FIX)", function () {
+  it("SEC-05 FIX: duplicate receiptId throws instead of silent shadowing", async function () {
     const log = new LocalReceiptLog();
     const receipt = {
       receiptId: "rcpt_dup",
@@ -623,14 +649,23 @@ describe("F14: LocalReceiptLog.append allows duplicate receiptIds without warnin
       recipient: ("0x" + "0".repeat(40)) as `0x${string}`,
       mode: "direct" as const,
     };
-    const receipt2 = { ...receipt, amountBase: 999n };
     await log.append(receipt);
-    await log.append(receipt2); // same receiptId, different payload
-    const list = await log.list(10);
-    expect(list.length).to.equal(2); // duplicates coexist
+
+    // SEC-05 FIX: second append with same receiptId must throw
+    let threw = false;
+    try {
+      const receipt2 = { ...receipt, amountBase: 999n };
+      await log.append(receipt2);
+    } catch (e: any) {
+      threw = true;
+      expect(e.message).to.match(/Duplicate receiptId/);
+    }
+    expect(threw, "duplicate append must throw").to.equal(true);
+
+    // Original receipt preserved — not shadowed
     const got = await log.get("rcpt_dup");
-    expect(got!.amountBase).to.equal(999n); // newest shadows the old silently
-    // An auditor who queries by ID sees the LAST write — the original is hidden.
+    expect(got).to.not.be.null;
+    expect(got!.amountBase).to.equal(1n);
   });
 });
 

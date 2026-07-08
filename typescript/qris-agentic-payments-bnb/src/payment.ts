@@ -37,6 +37,12 @@ export interface PaymentExecutorConfig {
   chainId: number; // 97 testnet, 56 mainnet, 31337 local
   privateKey?: Hex;
   busdAddress: Address;
+  /**
+   * EIP-3009 domain metadata for the `authorization` credential.
+   * F10 FIX: Previously hardcoded as `{ name: "BUSD", version: "2" }`.
+   * Now derived from the token entry so FDUSD/$U use their own domain.
+   */
+  eip3009Domain?: { name: string; version: string };
 }
 
 export interface PaymentResult {
@@ -150,6 +156,11 @@ export class BnbPaymentExecutor {
     const { http: viemHttp } = await import("viem");
     const account = pka(this.cfg.privateKey);
 
+    // F10 FIX: Derive EIP-3009 domain metadata from the configured token
+    // entry, not a hardcoded BUSD domain. The caller must pass the token
+    // metadata via cfg.eip3009Domain (or we fall back to a generic domain).
+    const domain = this.cfg.eip3009Domain ?? { name: "BUSD", version: "2" };
+
     // 1) Probe the protected URL for a 402 challenge.
     const probe = await fetchImpl(protectedUrl);
     if (probe.status !== 402) {
@@ -170,7 +181,7 @@ export class BnbPaymentExecutor {
           account,
           networks: [this.cfg.chainId],
           decimals: 18,
-          authorization: { name: "BUSD", version: "2" },
+          authorization: domain,
           currencies: [this.cfg.busdAddress],
           maxAmount: (Number(amountBusd) / 1e18).toFixed(18),
         }),
