@@ -102,7 +102,7 @@ npx hardhat run scripts/run-agent.ts
 # → with RATE_SOURCE=coingecko, fetches the live IDR/stablecoin rate in real time
 ```
 
-**Test suite** (25 tests, ~3s):
+**Test suite** (75 tests, ~12s):
 
 ```bash
 npx hardhat test
@@ -121,9 +121,57 @@ Expected output:
   Receipt log (2 tests)
   Agent with multi-token + policy + receipts (2 tests)
   x402 / MPP end-to-end (2 tests)
+  Security audit fixes (12 tests)
+  PoC exploit tests (6 tests)
+  Extensions / SDK modules (18 tests)
+  QrisPaymentVault contract (10 tests)
 
-  25 passing (3s)
+  75 passing (12s)
 ```
+
+## Web UI
+
+An interactive React + Vite + Tailwind frontend that visualises the entire
+agent payment pipeline — from QRIS scan to on-chain settlement.
+
+```bash
+cd web-ui
+npm install
+npm run dev    # http://localhost:3000
+npm run build  # production build → dist/
+```
+
+### Features
+
+- **7-step pipeline visualization**: Scan → Parse → Convert → Identity →
+  Policy → Settle → Receipt
+- **MetaMask wallet connect** (ethers.js v6 BrowserProvider)
+- **Live CoinGecko IDR↔BUSD rate** with static fallback
+- **CRC16-CCITT validation** matching `src/qris.ts`
+- **Optical-illusion design**: scanner-frame, pulsing rings, tunnel-entrance
+  spinner, confetti on success
+- **2-color palette**: indigo `#3D348B` + amber `#F0A202` on cream `#FAF7F2`
+
+### Deploy to Vercel
+
+```bash
+cd web-ui
+vercel --prod
+```
+
+The `vercel.json` is pre-configured with SPA rewrites. The build output is in
+`dist/`.
+
+### Smart Contract: QrisPaymentVault
+
+A real escrow contract that receives BUSD via `approve()` + `settle()`:
+
+```bash
+npx hardhat run scripts/deploy-vault.ts --network bscTestnet
+```
+
+The vault credits merchant balances and emits `PaymentSettled` events with
+unique receipt IDs. Merchants withdraw via `withdrawMerchantBalance()`.
 
 ## Architecture (5-layer Web2.5 model)
 
@@ -151,18 +199,24 @@ Expected output:
 ### File mapping
 
 ```
-src/qris.ts          QRIS parse + CRC16-CCITT (EMVCo TLV, pure TS, no deps)
-src/tokens.ts        Curated BNB Chain stablecoin registry (BUSD, FDUSD, $U)
-src/rates.ts         IDR → any stablecoin (static | CoinGecko, multi-token)
-src/offramp.ts       Settlement address seam (local | TransFi PSP stub)
-src/identity.ts      ERC-8004 agent identity + reputation + gate
-src/policy.ts        Spend guardrails (per-tx cap, daily cap, allowlist)
-src/receipts.ts      Payment receipt log (Greenfield memory seam)
-src/payment.ts       BnbPaymentExecutor (direct transfer | x402/MPP)
-src/agent.ts         QrisPayAgent orchestrator (plan → policy → execute → receipt)
-src/charge-server.ts Minimal 402 server for the x402/MPP loop demo
-contracts/MockBUSD.sol  18-decimal stablecoin stand-in
-test/*.test.ts       25 passing tests
+src/qris.ts            QRIS parse + CRC16-CCITT (EMVCo TLV, pure TS, no deps)
+src/tokens.ts          Curated BNB Chain stablecoin registry (BUSD, FDUSD, $U)
+src/rates.ts           IDR → any stablecoin (static | CoinGecko, multi-token)
+src/offramp.ts         Settlement address seam (local | TransFi PSP stub)
+src/identity.ts        ERC-8004 agent identity + reputation + gate
+src/policy.ts          Spend guardrails (per-tx cap, daily cap, allowlist)
+src/receipts.ts        Payment receipt log (Greenfield memory seam)
+src/payment.ts         BnbPaymentExecutor (direct transfer | x402/MPP)
+src/agent.ts           QrisPayAgent orchestrator (plan → policy → execute → receipt)
+src/charge-server.ts   Minimal 402 server for the x402/MPP loop demo
+contracts/MockBUSD.sol       18-decimal stablecoin stand-in
+contracts/QrisPaymentVault.sol  Real escrow: settle ERC20 to merchant + receiptId
+scripts/deploy-vault.ts      Hardhat deploy script for QrisPaymentVault
+test/*.test.ts              75 passing tests
+web-ui/                     Interactive React + Vite + Tailwind frontend
+web-ui/src/App.jsx          7-step pipeline UI with optical-illusion design
+web-ui/src/useWallet.jsx    MetaMask wallet connect (ethers.js v6)
+web-ui/src/qris.js          Browser QRIS parser + CRC16-CCITT
 ```
 
 ## Usage
